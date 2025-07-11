@@ -228,7 +228,7 @@ static void Connect_Request(void);
 static void Switch_OFF_GPIO(void);
 
 /* USER CODE BEGIN PFP */
-
+static void Disconnect(void);
 /* USER CODE END PFP */
 
 /* External variables --------------------------------------------------------*/
@@ -354,7 +354,7 @@ void APP_BLE_Init(void)
   HW_TS_Create(CFG_TIM_PROC_ID_ISR, &(BleApplicationContext.SwitchOffGPIO_timer_Id), hw_ts_SingleShot, Switch_OFF_GPIO);
 
   /* USER CODE BEGIN APP_BLE_Init_2 */
-
+  UTIL_SEQ_RegTask( 1u << CFG_TASK_DISCONN_DEV_1_ID, UTIL_SEQ_RFU, Disconnect);
   /* USER CODE END APP_BLE_Init_2 */
   return;
 }
@@ -1083,7 +1083,18 @@ const uint8_t* BleGetBdAddress(void)
 }
 
 /* USER CODE BEGIN FD_LOCAL_FUNCTIONS */
-
+static void Disconnect(void)
+{
+  tBleStatus result = aci_gap_terminate(BleApplicationContext.BleApplicationContext_legacy.connectionHandle, HCI_REMOTE_USER_TERMINATED_CONNECTION_ERR_CODE);
+  if (result != BLE_STATUS_SUCCESS)
+  {
+     APP_DBG_MSG("aci_gap_terminate failure: reason=0x%02X\n", result);
+  }
+  else
+  {
+    APP_DBG_MSG("==>> aci_gap_terminate : Success\n");
+  }
+}
 /* USER CODE END FD_LOCAL_FUNCTIONS */
 
 /*************************************************************

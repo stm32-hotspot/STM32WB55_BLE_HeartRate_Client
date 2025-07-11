@@ -110,14 +110,15 @@ typedef struct
 {
   uint8_t                          Notification_Status; /* used to check if HeartRate Server is enabled to Notify */
   HeartRate_ButtonCharValue_t      ButtonStatus;
-  uint16_t                         ConnectionHandle; 
+  uint16_t                         ConnectionHandle;
+  uint8_t                          Disconnect_mgr_timer_Id;
 } HeartRate_Client_App_Context_t;
 
 /* USER CODE END PTD */
 
 /* Private defines ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define DISCONNECT_TIMEOUT            (0.1*1000*1000/CFG_TS_TICK_VAL) /**< 100ms */
 /* USER CODE END PD */
 
 /* Private macros -------------------------------------------------------------*/
@@ -153,6 +154,7 @@ static void Button1_Trigger_Received( void );
 static void Button2_Trigger_Received( void );
 static void Button3_Trigger_Received( void );
 static void Update_Service( void );
+static void HRC_APP_Disconnect(void);
 /* USER CODE END PFP */
 
 /* Functions Definition ------------------------------------------------------*/
@@ -169,6 +171,8 @@ void HRC_APP_Init(void)
   UTIL_SEQ_RegTask( 1<< CFG_TASK_SW1_BUTTON_PUSHED_ID, UTIL_SEQ_RFU, Button1_Trigger_Received );
   UTIL_SEQ_RegTask( 1<< CFG_TASK_SW2_BUTTON_PUSHED_ID, UTIL_SEQ_RFU, Button2_Trigger_Received );
   UTIL_SEQ_RegTask( 1<< CFG_TASK_SW3_BUTTON_PUSHED_ID, UTIL_SEQ_RFU, Button3_Trigger_Received );
+  
+  HW_TS_Create(CFG_TIM_PROC_ID_ISR, &(HeartRate_Client_App_Context.Disconnect_mgr_timer_Id), hw_ts_SingleShot, HRC_APP_Disconnect);
 
   /**
    * Initialize LedButton Service
@@ -256,6 +260,11 @@ void HRC_APP_SW2_Button_Action(void)
 void HRC_APP_SW3_Button_Action(void)
 {
   UTIL_SEQ_SetTask(1<<CFG_TASK_SW3_BUTTON_PUSHED_ID, CFG_SCH_PRIO_0);
+}
+
+static void HRC_APP_Disconnect(void)
+{
+  UTIL_SEQ_SetTask(1u << CFG_TASK_DISCONN_DEV_1_ID, CFG_SCH_PRIO_0);
 }
 /* USER CODE END FD */
 
@@ -530,7 +539,7 @@ static SVCCTL_EvtAckStatus_t Event_Handler(void *Event)
         {
           aci_gatt_proc_complete_event_rp0 *pr = (void*)blecore_evt->data;
 #if(CFG_DEBUG_APP_TRACE != 0)
-          APP_DBG_MSG("-- GATT : ACI_GATT_PROC_COMPLETE_VSEVT_CODE \n");
+          APP_DBG_MSG("-- GATT : ACI_GATT_PROC_COMPLETE_VSEVT_CODE - Connection Handle: %04X, Error Code: %02X\n", pr->Connection_Handle, pr->Error_Code);
           APP_DBG_MSG("\n");
 #endif
 
@@ -549,6 +558,14 @@ static SVCCTL_EvtAckStatus_t Event_Handler(void *Event)
           }
         }
         break; /*ACI_GATT_PROC_COMPLETE_VSEVT_CODE*/
+        
+        case ACI_GATT_PROC_TIMEOUT_VSEVT_CODE:
+        {
+          aci_gatt_proc_timeout_event_rp0 *p_evt_rsp = (void*)blecore_evt->data;
+          APP_DBG_MSG("-- GATT : ACI_GATT_PROC_TIMEOUT_VSEVT_CODE - Connection Handle: %04X\n", p_evt_rsp->Connection_Handle);
+          HW_TS_Start(HeartRate_Client_App_Context.Disconnect_mgr_timer_Id, (uint32_t) DISCONNECT_TIMEOUT);
+        }
+        break;/* ACI_GATT_PROC_TIMEOUT_VSEVT_CODE */
         
         case ACI_ATT_READ_RESP_VSEVT_CODE:
         {
@@ -640,9 +657,9 @@ tBleStatus Write_Char(uint16_t UUID, uint8_t Service_Instance, uint8_t *pPayload
     switch(UUID)
     {
       case CONTROL_POINT_UUID:
-        ret = aci_gatt_write_without_resp(aHeartRateClientContext[index].connHandle,
+        ret = aci_gatt_write_char_value(aHeartRateClientContext[index].connHandle,
                                          aHeartRateClientContext[index].HeartRateControlPointCharHdle,
-                                         2, /* charValueLen */
+                                         1, /* charValueLen */
                                          (uint8_t *)  pPayload);
         break;
       default:
@@ -706,14 +723,7 @@ tBleStatus Toggle_Notify_Char(uint16_t UUID, uint8_t Service_Instance, uint8_t *
 
 void Button1_Trigger_Received(void)
 {
-  if(HeartRate_Client_App_Context.ButtonStatus.Write == 0x00)
-  {
-    HeartRate_Client_App_Context.ButtonStatus.Write = 0x01;
-  }
-  else 
-  {
-    HeartRate_Client_App_Context.ButtonStatus.Write = 0x00;
-  }
+  HeartRate_Client_App_Context.ButtonStatus.Write = 0x01;
   
   APP_DBG_MSG("-- HEART RATE APPLICATION CLIENT : BUTTON PUSHED - WRITE HEART RATE CONTROL POINT - %02X \n ", HeartRate_Client_App_Context.ButtonStatus.Write);
   APP_DBG_MSG(" \n\r");
